@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update table="sys_sg_applet_launcher_tab">
+    <sys_sg_applet_launcher_tab action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <applet_launcher display_value="Dynamic List management">d23af1e92f7320102d00d5ccf699b647</applet_launcher>
+        <icon display_value="Home Dynamic List management">9a3af1e92f7320102d00d5ccf699b647</icon>
+        <label>Dynamic List management</label>
+        <roles>x_10255_dynamic_li.dlm</roles>
+        <sys_class_name>sys_sg_applet_launcher_tab</sys_class_name>
+        <sys_created_by>nawaid.anjum</sys_created_by>
+        <sys_created_on>2021-04-28 14:01:07</sys_created_on>
+        <sys_id>5a3af1e92f7320102d00d5ccf699b647</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>Dynamic List management</sys_name>
+        <sys_package display_value="Dynamic List management" source="x_10255_dynamic_li">26c9f9a92f7320102d00d5ccf699b6b3</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="Dynamic List management">26c9f9a92f7320102d00d5ccf699b6b3</sys_scope>
+        <sys_update_name>sys_sg_applet_launcher_tab_5a3af1e92f7320102d00d5ccf699b647</sys_update_name>
+        <sys_updated_by>nawaid.anjum</sys_updated_by>
+        <sys_updated_on>2021-04-28 14:01:07</sys_updated_on>
+    </sys_sg_applet_launcher_tab>
+</record_update>

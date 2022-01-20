@@ -1,0 +1,595 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>package_private</access>
+        <active>true</active>
+        <api_name>x_10255_dynamic_li.sn_sec_dlm_util</api_name>
+        <caller_access/>
+        <client_callable>false</client_callable>
+        <description/>
+        <name>sn_sec_dlm_util</name>
+        <script><![CDATA[var sn_sec_dlm_util = Class.create();
+sn_sec_dlm_util.prototype = {
+	/*
+    * Gets System Properties containing Sys ID's of Observable types
+    */
+	initialize: function () {
+		this.ip4Type = gs.getProperty('x_ingmb_sn_sec_dlm.ip4_type');
+		// Commented out as IPv6 Not supported by GIBA currently this.ip6Type = gs.getProperty('x_ingmb_sn_sec_dlm.ip6_type');
+		this.domainType = gs.getProperty('x_ingmb_sn_sec_dlm.domain_type');
+		this.urlType = gs.getProperty('x_ingmb_sn_sec_dlm.url_type');
+		this.rangeType = gs.getProperty('x_ingmb_sn_sec_dlm.range_type');
+		this.emailType = gs.getProperty('x_ingmb_sn_sec_dlm.email_type'); 
+	},
+
+	/*
+    * Creates a Dynamic List Management Block Request record
+    *
+    * @param taskSysId - the ID of the Security Incident the Request came from
+    * @param observables - A JSON String array of observables with a formatting of
+    *                     [{"value": 6.6.6.6, type: SysID}, ...]
+    */
+	createBlockRequest: function (observables, taskSysID, blockOn) {
+
+		var obsObj = JSON.parse(observables);
+		var i;
+		var observableRecord;
+		var obsType;
+		var blockRequest = new GlideRecord('x_ingmb_sn_sec_dlm_block_request');
+
+		for (i = 0; i < obsObj.length; i++) {
+			observableRecord = new GlideRecord('sn_ti_observable');
+			observableRecord.addQuery('value', obsObj[i].value);
+			observableRecord.addQuery('type', obsObj[i].type);
+			observableRecord.query();
+			if (observableRecord.next()) {
+				var existingBlock = new GlideRecord('x_ingmb_sn_sec_dlm_block_request');
+				existingBlock.addQuery('observable', observableRecord.getValue('sys_id'));
+				existingBlock.query();
+				if (!existingBlock.hasNext()) {
+					try {
+						obsType = this.obsTypeCheck(observableRecord.getValue('type'));
+
+						if(!obsType){
+							throw "Observable is of incorrect type, Allow Request not created";
+						}
+
+						blockRequest.initialize();
+						blockRequest.setValue('observable', observableRecord.getValue('sys_id'));
+						blockRequest.setValue('security_incident', taskSysID);
+						blockRequest.setValue('block_on', blockOn);
+						blockRequest.setValue('type', obsType);                       
+						//this.addSecurityTagObs(observableRecord.getValue('sys_id'), obsType, 'Blocked');
+						blockRequest.insert();
+					}
+					catch (err) {
+						gs.error('Observable is of incorrect type, Block Request not created. Observable value - ' + observableRecord.getValue('value') + ' Observable type - ' + observableRecord.getValue('type'));
+						gs.error(err);
+					}
+				}
+			}
+		}
+	},
+
+
+
+	/*
+    * Creates a Dynamic List Management Allow Request record
+    * 
+    * @param userID - the ID of the User the Request came from
+    * @param observable - Observable record
+    *                     
+    */
+	createAllowRequest: function (observable, description, endDate, allowType, userEmail, reqItem, differentStatus) {
+		var status = gs.nil(differentStatus) ? 'requested' : differentStatus;
+		if(allowType == 'Whitelist-not-to-block'){
+			allowType = 'allow';
+		}
+		else if(allowType == 'Whitelist-not-to-inspect'){
+			allowType = 'allow-noinspect';
+		}
+		else if(allowType == 'Always-allowed-access'){
+			allowType = 'allow-always';
+		}
+
+		var user = 'ing_glits';
+		var obsType;
+		var observableRecord = new GlideRecord('sn_ti_observable');
+		observableRecord.get(observable);
+
+		if(!observableRecord.isValidRecord()){
+			observableRecord = this.createObservable(observable);
+		}
+		try {
+			var allowRequest = new GlideRecord('x_ingmb_sn_sec_dlm_allow_request');
+			obsType = this.obsTypeCheck(observableRecord.getValue('type'));
+
+			user = new GlideRecord('sys_user');
+			user.get('email', userEmail);
+			if(user.isValidRecord()){
+				user = user.getValue('sys_id');
+			}
+
+			if(!obsType){
+				throw "Observable is of incorrect type, Allow Request not created";
+			}
+
+			if(this.isPrivateIP(observableRecord.getValue('value'), obsType)){
+				gs.error('Observable ip range is Private. Allow Request not created');
+				return;
+			}
+			allowRequest.initialize();
+			allowRequest.setValue('observable', observableRecord.getValue('sys_id'));
+			allowRequest.setValue('description', description);
+			allowRequest.setValue('type', obsType);
+			allowRequest.setValue('user', user);
+			allowRequest.setValue('review_date', endDate);
+			allowRequest.setValue('allow_type', allowType);
+			allowRequest.setValue('status', status);
+			allowRequest.setValue('requested_item', reqItem);
+			allowRequest.insert();
+			this.addSecurityTagObs(observableRecord.getValue('sys_id'), obsType, 'Allowed');
+
+		}
+		catch (err) {
+			gs.error('Observable is of incorrect type, Allow Request not created. Observable value - ' + observableRecord.getValue('value') + ' Observable type - ' + observableRecord.getValue('type'));
+			gs.error(err);
+		}
+
+	},
+	/*
+    * Creates Observable
+    * @param obsVal - observable value
+    */
+	createObservable: function(obsVal) {
+		var obs = new GlideRecord('sn_ti_observable');
+		obs.initialize();
+		obs.setValue('value', obsVal);
+		obs.insert();
+		return obs;
+	},
+
+	/*
+    * Adds Security Tags to Observables
+    * @param obs - observable record
+    * @param type - type of observable
+    */
+	addSecurityTagObs: function (obs, type, request) {
+		var tag = new GlideRecord('sn_sec_cmn_applied_security_tag');
+
+		var securityTag = new GlideRecord('sn_sec_cmn_security_tag');
+
+		if (type == 'ip') {
+			securityTag.get('name', 'DLM - ' + request + ' IPs');
+		}
+		else if (type == 'domain') {
+			securityTag.get('name', 'DLM - ' + request + ' Domains');
+		}
+		else if (type == 'email'){
+			securityTag.get('name', 'DLM - ' + request + ' Emails');
+		}
+
+		var tagID = securityTag.getValue('sys_id');
+
+		tag.addQuery('security_tag', tagID);
+		tag.addQuery('record_id', obs);
+		tag.addQuery('record_table', 'sn_ti_observable');
+		tag.query();
+
+		if (!tag.next()) {
+			tag = new GlideRecord("sn_sec_cmn_applied_security_tag");
+			tag.initialize();
+			tag.security_tag = tagID;
+			tag.record_id = obs;
+			tag.record_table = "sn_ti_observable";
+			tag.insert();
+		}
+	},
+
+	/*
+    * Removes Security Tags to Observables
+    * @param obs - observable record
+    * @param type - type of observable
+    */
+	removeSecurityTagObs: function (obs, type, request) {
+
+		var securityTag = new GlideRecord('sn_sec_cmn_security_tag');
+		if (type == 'ip') {
+			securityTag.get('name', 'DLM - ' + request + ' IPs');
+		}
+		else if (type == 'domain') {
+			securityTag.get('name', 'DLM - ' + request + ' Domains');
+		}
+		else if (type == 'email'){
+			securityTag.get('name', 'DLM - ' + request + ' Emails');
+		}
+
+		var tag = new GlideRecord("sn_sec_cmn_applied_security_tag");
+		tag.addQuery('security_tag', securityTag.getValue('sys_id'));
+		tag.addQuery('record_id', obs);
+		tag.addQuery('record_table', "sn_ti_observable");
+		tag.query();
+
+		if (tag.next()) {
+			tag.deleteRecord();
+		}
+
+	},
+
+
+	/*
+    * Gets Symantec ASG list of records and returns a response string
+    * @param type - the type of list requested
+    */
+	getSymASGList: function (type) {
+		var observable;
+		var preBlock;
+		var responseHTTPHeader;
+		var responseHTTPString;
+		var responseIPHeader;
+		var responseIPString;
+		var responseString;
+		var regex;
+		var httpValue;
+		var stripString;
+
+		if (type == 'block') {
+			observable = new GlideRecord('sn_ti_observable');
+			preBlock = new GlideRecord('x_ingmb_sn_sec_dlm_block_request');
+			preBlock.addQuery('block_on', '!=', 'mail');
+			preBlock.addQuery('status', 'active').addOrCondition('status', 'requested');
+			preBlock.query();
+
+			responseHTTPHeader = "define category HTTP_blocklist \n";
+			responseHTTPString = "";
+			responseIPHeader = "define category IP_blocklist \n";
+			responseIPString = "";
+			responseString = '';
+			gs.info("Number of block requests: " + preBlock.getRowCount());
+			if (preBlock.hasNext()) {
+
+				while (preBlock.next()) {
+
+					observable.get(preBlock.getValue('observable'));
+
+					if (observable.getValue('type') == this.ip4Type || observable.getValue('type') == this.rangeType) {
+						responseIPString += observable.getValue('value') + '\n';
+					}
+					else {
+						//regex = /(^\w+:|^)\/\//gm;
+						//httpValue = observable.getValue('value') + '';
+						//stripString = httpValue.replace(regex, '');
+
+						//responseHTTPString += stripString + '\n';
+						responseHTTPString += '"' + observable.getValue('value') + '"'+ '\n';
+					}
+				}
+				responseString = responseHTTPHeader + responseHTTPString + 'end' + '\n' + responseIPHeader + responseIPString + 'end';
+			}
+			else {
+				responseString = "Error : No Block Requests found";
+			}
+			return responseString;
+		}
+		else if (type == 'allow' || type == 'allow-always' || type == 'allow-noinspect') {
+			observable = new GlideRecord('sn_ti_observable');
+			preBlock = new GlideRecord('x_ingmb_sn_sec_dlm_allow_request');
+			preBlock.addQuery('allow_type', type);
+			preBlock.addQuery('status', '!=', 'inactive');
+			preBlock.query();
+
+			responseHTTPHeader = "define category HTTP_allowlist \n";
+			responseHTTPString = "";
+			responseIPHeader = "define category IP_allowlist \n";
+			responseIPString = "";
+			responseString = '';
+
+			if (preBlock.hasNext()) {
+
+				while (preBlock.next()) {
+
+					observable.get(preBlock.getValue('observable'));
+
+					if (observable.getValue('type') == this.ip4Type || observable.getValue('type') == this.rangeType) {
+						responseIPString += observable.getValue('value') + '\n';
+					}
+					else {
+						regex = /(^\w+:|^)\/\//gm;
+						httpValue = observable.getValue('value') + '';
+						stripString = httpValue.replace(regex, '');
+
+						responseHTTPString += stripString + '\n';
+					}
+				}
+				responseString = responseHTTPHeader + responseHTTPString + 'end' + '\n' + responseIPHeader + responseIPString + 'end';
+			}
+			else {
+				responseString = "Error : No Allow Requests found";
+			}
+			return responseString;
+		}
+	},
+
+	/*
+    * Gets McAfee list of records and returns XML payload
+    *
+    * @param content - the type of list requested
+    */
+	getMcAfeeList: function (content, type) {
+		var list;
+
+		switch (type) {
+			case 'block':
+				list = this.getMcAfeeBlockList(content);
+				break;
+			case 'allow':
+			case 'allow-always':
+			case 'allow-noinspect':
+				list = this.getMcAfeeAllowList(content, type);
+				break;
+			default:
+				list = this.getMcAfeeBlockList(content);
+				break;
+		}
+		return list;
+	},
+
+	getMcAfeeBlockList: function (content) {
+		var listType;
+
+		var xmlString = "<?xml version='1.0' encoding='UTF-8'?><content type='" + content + "'>" + "</content>";
+
+		if (content == 'string') {
+			listType = 'domain';
+		}
+		else if (content == 'iprange') {
+			listType = 'ip';
+		}
+
+		var xmlDoc = new XMLDocument2();
+		xmlDoc.parseXML(xmlString);
+		var listNode;
+
+		var dateTime = new GlideDateTime();
+		var date;
+		var gCreatedBy;
+		var observable = new GlideRecord('sn_ti_observable');
+
+		var preBlock = new GlideRecord('x_ingmb_sn_sec_dlm_block_request');
+		preBlock.addQuery('type', listType);
+		preBlock.addQuery('block_on', '!=', 'mail');
+		preBlock.addQuery('status', 'active').addOrCondition('status', 'requested');
+		preBlock.orderBy('sys_created_on');  //Added for STRY0892792
+		preBlock.query();
+
+
+		if (preBlock.hasNext()) {
+
+			while (preBlock.next()) {
+
+				observable.get(preBlock.getValue('observable'));
+				xmlDoc.setCurrentElement(xmlDoc.getDocumentElement());
+				listNode = xmlDoc.createElement("listEntry");
+				xmlDoc.setCurrentElement(listNode);
+				if (observable.getValue('type') == this.ip4Type) {
+					xmlDoc.createElementWithTextValue("entry", observable.getValue('value') + '/32');
+				}
+				else {
+					xmlDoc.createElementWithTextValue("entry", observable.getValue('value'));
+				}
+
+				dateTime.setValue(preBlock.getValue('sys_updated_on'));
+				date = dateTime.getDate();
+				gCreatedBy = preBlock.getValue('sys_created_by');
+
+				if (global.JSUtil.notNil(preBlock.getValue('description'))) {
+					xmlDoc.createElementWithTextValue("description", "State - " + preBlock.getDisplayValue('status') + ' ' + date + " " + gCreatedBy + " " + preBlock.getDisplayValue('security_incident') + ' ' + preBlock.getValue('description'));
+				}
+				else {
+					xmlDoc.createElementWithTextValue("description", "State - " + preBlock.getDisplayValue('status') + ' ' + date + " " + gCreatedBy + " " + preBlock.getDisplayValue('security_incident'));
+				}
+			}
+		}
+		else {
+			xmlDoc.setCurrentElement(xmlDoc.getDocumentElement());
+			listNode = xmlDoc.createElement("Error");
+			xmlDoc.setCurrentElement(listNode);
+			xmlDoc.createElementWithTextValue("Description", "No Block Requests found");
+		}
+
+		return xmlDoc;
+	},
+
+	getMcAfeeAllowList: function(content, allowType){
+		var xmlString = "<?xml version='1.0' encoding='UTF-8'?><content type='" + content + "'>" + "</content>";
+		var listType;
+
+		if (content == 'string') {
+			listType = 'domain';
+		}
+		else if (content == 'iprange') {
+			listType = 'ip';
+		}
+
+		var xmlDoc = new XMLDocument2();
+		xmlDoc.parseXML(xmlString);
+		var listNode;
+
+		var dateTime = new GlideDateTime();
+		var date;
+		var gCreatedBy;
+
+		var preBlock = new GlideRecord('x_ingmb_sn_sec_dlm_allow_request');
+		preBlock.addQuery('type', listType);
+		preBlock.addQuery('status', '!=', 'inactive');
+		preBlock.addQuery('allow_type', allowType);
+		preBlock.orderBy('sys_created_on');  //Added for STRY0892792
+		preBlock.query();
+
+
+		if (preBlock.hasNext()) {
+			while (preBlock.next()) {
+				var observable = preBlock.observable.getRefRecord();
+
+				xmlDoc.setCurrentElement(xmlDoc.getDocumentElement());
+				listNode = xmlDoc.createElement("listEntry");
+				xmlDoc.setCurrentElement(listNode);
+
+				if (observable.getValue('type') == this.ip4Type) {
+					xmlDoc.createElementWithTextValue("entry", observable.getValue('value') + '/32');
+				}
+				else {
+					xmlDoc.createElementWithTextValue("entry", observable.getValue('value'));
+				}
+
+				dateTime.setValue(preBlock.getValue('sys_updated_on'));
+				date = dateTime.getDate();
+				requestedBy = preBlock.user.user_name + '';
+
+				var requestedItem = '';
+				if(!gs.nil(preBlock.requested_item)){
+					requestedItem = " " + preBlock.getDisplayValue('requested_item');
+				}
+
+				if (global.JSUtil.notNil(preBlock.getValue('description'))) {
+					xmlDoc.createElementWithTextValue("description", "State - " + preBlock.getDisplayValue('status') + ' ' + date + " " + requestedBy + " " + preBlock.getValue('description') + requestedItem);
+				}
+				else {
+					xmlDoc.createElementWithTextValue("description", "State - " + preBlock.getDisplayValue('status') + ' ' + date + " " + requestedBy + requestedItem);
+				}
+			}
+		}
+		else {
+			xmlDoc.setCurrentElement(xmlDoc.getDocumentElement());
+			listNode = xmlDoc.createElement("Error");
+			xmlDoc.setCurrentElement(listNode);
+			xmlDoc.createElementWithTextValue("Description", "No Allow Requests found");
+		}
+
+		return xmlDoc;
+	},
+
+	/*
+    * Updates Block Request with system status
+    * @param system - the system the request has come from
+    * @param type - the type of records to be updated
+    */
+	updateRequests: function (system, type, blockAllow) {
+		var requests;
+
+		if (blockAllow == 'block') {
+			requests = new GlideRecord('x_ingmb_sn_sec_dlm_block_request');
+		} else {
+			requests = new GlideRecord('x_ingmb_sn_sec_dlm_allow_request');
+			requests.addQuery('allow_type', blockAllow);
+		}
+
+		requests.addEncodedQuery('status=requested^ORstatus=inactive');
+
+		if (type == 'string') {
+			requests.addQuery('type', 'domain');
+		}
+		else if (type == 'iprange') {
+			requests.addQuery('type', 'ip');
+		}
+
+		requests.query();
+
+		while (requests.next()) {
+
+			if (requests.getValue('status') == 'requested') {
+				requests.setValue(system, true);
+				requests.update();
+			}
+			else if (requests.getValue('status') == 'inactive') {
+				requests.setValue(system, false);
+				requests.update();
+			}
+		}
+	},
+	/*
+    * Deactivates Block Requests that have had a catalog item from GLITS
+    * @param url - url that is to be unblocked
+    */
+	gibaBlackListReq: function (url) {
+
+		var bReq = new GlideRecord('x_ingmb_sn_sec_dlm_block_request');
+		var obs = new GlideRecord('sn_ti_observable');
+		obs.get('value', url);
+
+		if(obs.isValidRecord()){
+			obs = obs.getValue('sys_id');
+			bReq.get('observable', obs);
+
+			if(bReq.isValidRecord()){
+				this.removeSecurityTagObs(obs, 'domain', 'Blocked');
+				bReq.status = 'inactive';
+				bReq.update();
+			}
+		}
+	},
+	/*
+	* Used for condition for Allow Request UI Action
+	* @param current - current record
+	*/
+	allowCondition: function(current){
+
+		var typeNames = ['Domain name','URL', 'IPV4 Netmask', 'IP address (V4)'];
+		var canRun = false;
+
+		for(var i = 0; i < typeNames.length; i++){
+			if(current.type.name+'' == typeNames[i]){
+				canRun = true;
+			}
+		}
+		return canRun;
+	},
+
+	/*
+	* Used to get Observable type
+	* @param obs - Observable
+	*/
+	obsTypeCheck: function(obs){
+		if (obs == this.ip4Type || obs == this.rangeType) {
+			return 'ip';
+		}
+		else if (obs == this.domainType || obs == this.urlType) {
+			return 'domain';
+		}
+		else if (obs == this.emailType){
+			return 'email';
+		}
+		else{
+			return false;
+		}
+	},
+
+	isPrivateIP: function(ip, type){
+		if(type != 'ip'){
+			return false;
+		}
+		var ranges = ip.split('.');
+		var isPrivate = ranges[0] == '10' 
+		|| (ranges[0] == '172' && (parseInt(ranges[1],10) >= 16 && parseInt(ranges[1], 10) <= 31))
+		|| (ranges[0] == '192' && ranges[1] == '168');
+
+		return isPrivate;
+
+	},
+
+
+	type: 'sn_sec_dlm_util'
+};]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>nawaid.anjum</sys_created_by>
+        <sys_created_on>2021-04-28 14:02:22</sys_created_on>
+        <sys_id>b45a79e92f7320102d00d5ccf699b694</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>sn_sec_dlm_util</sys_name>
+        <sys_package display_value="Dynamic List management" source="x_10255_dynamic_li">26c9f9a92f7320102d00d5ccf699b6b3</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="Dynamic List management">26c9f9a92f7320102d00d5ccf699b6b3</sys_scope>
+        <sys_update_name>sys_script_include_b45a79e92f7320102d00d5ccf699b694</sys_update_name>
+        <sys_updated_by>nawaid.anjum</sys_updated_by>
+        <sys_updated_on>2021-04-28 14:02:22</sys_updated_on>
+    </sys_script_include>
+</record_update>

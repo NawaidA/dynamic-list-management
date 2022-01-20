@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update table="sys_sg_item_stream_segment">
+    <sys_sg_item_stream_segment action="INSERT_OR_UPDATE">
+        <empty_state/>
+        <interleave_order_direction>asc</interleave_order_direction>
+        <name>dlm Item Stream Segment</name>
+        <order>0</order>
+        <screen display_value="dlms">a63af5e92f7320102d00d5ccf699b690</screen>
+        <sys_class_name>sys_sg_item_stream_segment</sys_class_name>
+        <sys_created_by>nawaid.anjum</sys_created_by>
+        <sys_created_on>2021-04-28 14:01:07</sys_created_on>
+        <sys_id>a23af5e92f7320102d00d5ccf699b691</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>dlm Item Stream Segment</sys_name>
+        <sys_package display_value="Dynamic List management" source="x_10255_dynamic_li">26c9f9a92f7320102d00d5ccf699b6b3</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="Dynamic List management">26c9f9a92f7320102d00d5ccf699b6b3</sys_scope>
+        <sys_update_name>sys_sg_item_stream_segment_a23af5e92f7320102d00d5ccf699b691</sys_update_name>
+        <sys_updated_by>nawaid.anjum</sys_updated_by>
+        <sys_updated_on>2021-04-28 14:01:07</sys_updated_on>
+    </sys_sg_item_stream_segment>
+</record_update>
